@@ -1,7 +1,7 @@
 package states;
 
 public enum ContainerRotateDirection {
-    IDLE,
+    NORMAL,
     ROTATE_LEFT,
     ROTATE_RIGHT
 }

@@ -1,147 +1,126 @@
-import states.ContainerRotateDirection;
+import sensors.ControlSensors;
+import sensors.InformationSensors;
 import states.ContainerState;
 import states.TransporterMoveDirection;
 
+import java.util.NoSuchElementException;
+
 public class StateController {
-    // region Управляющие сигналы (сделать что-то)
-    private static boolean[] Vi = new boolean[3];  // Открыть задвижку резервуаров -- индексирование с 0 до 2
-    private static boolean MR = false; // Транспортер вправо 0-1
-    private static boolean ML = false; // Транспортер влево 0-1
-    private static boolean MKR = false;    // Повернуть контейнер вправо для сброса в B0-B3 0-1
-    private static boolean MKL = false;    // Повернуть контейнер влево для сброса в B4-B7 0-1
-    private static boolean EMERGENCY_STOP = false; // Аварийная остановка транспортера
-
-    private static void openValve(int number){
-        Vi[0] = false;
-        DVi[0] = false;
-        Vi[1] = false;
-        DVi[1] = false;
-        Vi[2] = false;
-        DVi[2] = false;
-
-        switch (number){
-            case 1:
-                Vi[0] = true;
-                DVi[0] = true;
-                break;
-            case 2:
-                Vi[1] = true;
-                DVi[1] = true;
-                break;
-            case 3:
-                Vi[2] = true;
-                DVi[2] = true;
-                break;
-            default:
-                throw new IllegalArgumentException("Ожидается 1, 2 или 3");
-        }
-    }
-
-    private static void moveTransporter(TransporterMoveDirection direction){
-        switch (direction){
-            case IDLE:
-                MR = false;
-                ML = false;
-                break;
-            case MOVE_LEFT:
-                MR = false;
-                ML = true;
-                break;
-            case MOVE_RIGHT:
-                MR = true;
-                ML = false;
-                break;
-        }
-    }
-
-    private static void rotateTransporter(ContainerRotateDirection direction){
-        switch (direction){
-            case IDLE:
-                MKR = false;
-                MKL = false;
-
-                DKL = false;
-                DKR = false;
-                DN = true;
-
-                break;
-            case ROTATE_LEFT:
-                MKR = false;
-                MKL = true;
-
-                DKL = true;
-                DKR = false;
-                DN = false;
-
-                break;
-            case ROTATE_RIGHT:
-                MKR = true;
-                MKL = false;
-
-                DKL = false;
-                DKR = true;
-                DN = false;
-
-                break;
-        }
-    }
-
-    private static void processEmergencyStop(){
-        EMERGENCY_STOP = true;
-    }
-    // endregion
-
-    // region Информационные сигналы (проверить что-то)
-    private static boolean[] DRi = new boolean[3]; // Опустошен ли резервуар Ri -- индексирование с 0 до 2 -- реальное с 1 до 3
-    private static boolean[] DVi = new boolean[3]; // Открыт ли резервуар Ri -- индексирование с 0 до 2 -- реальное с 1 до 3
-    private static boolean[] DPi = new boolean[4]; // Находится ли контейнер под резервуаром Ri или он в P0 -- индексирование с 0 до 3 -- реальное с 0 до 3
-    private static boolean DKL = false;    // Поворачивается ли контейнер влево
-    private static boolean DKR = false;    // Поворачивается ли контейнер вправо
-    private static boolean DN = true;  // В нейтральном ли положении контейнер
-    private static boolean[] Dj = new boolean[8];  // Заполнен ли бункер Dj -- индексирование с 0 до 7 -- реальное с 0 до 7
-    private static boolean BK0 = false;    // Вышел ли контейнер за заданный левый предел
-    private static boolean BK1 = false;    // Вышел ли контейнер за заданный правый предел
-    private static boolean DT = false; // Сработал ли таймер заполнения
-    private static boolean AT = false; // Сработал ли аварийный сигнал от таймера превышения ожидаемого времени операции
-    // endregion
-
-    // region Технические переменные
-    private static ContainerState containerState = ContainerState.IDLE;
-
+    private static ControlSensors controlSensors;
+    private static InformationSensors informationSensors;
+    private static ContainerState containerState;
+    private static int[] words = new int[] {0b101, 0b101, 0b011, 0b010};
     private static byte fillTimer = 15;    // таймер заполнения на 15 секунд
     private static byte emergencyTimer = 20;   // аварийный таймер операции на 20 секунд
-
-    // Положение:
-    // <0 - аварийная точка BK0
-    // движение контейнера в 0-50, где 10 - P0, 20 - P1, 30 - P2, 40 - P3
-    // >50 - аварийная точка BK1
-    private static short containerPosition = 5;
-    // endregion
+    private static byte indexR = -1;
 
     static void main() {
-        while (true){
-            if(shouldStayInIdle()){
-                containerState = ContainerState.IDLE;
-                continue;
-            }
+        containerState = ContainerState.START;
+        controlSensors = new ControlSensors();
+        informationSensors = new InformationSensors();
+        controlSensors.setInformationSensors(informationSensors);
+        informationSensors.setControlSensors(controlSensors);
 
+
+
+        while (true){
             switch (containerState){
-                case IDLE -> {break;}
-                case MOVING_TO_LOAD -> {movingToLoad(); break;}
-                case LOADING -> {loading(); break;}
-                case MOVING_TO_UNLOAD -> {movingToUnload(); break;}
-                case UNLOADING -> {unloading(); break;}
-                case EMERGENCY_STOP -> {emergencyStop(); break;}
-                case null, default -> {throw new IllegalStateException("Неверное состояние автомата!");}
+                case START -> start();
+                case FIND_LOAD -> findLoad();
+                case MOVING_TO_LOAD -> movingToLoad();
+                case LOADING -> loading();
+                case FIND_UNLOAD -> findUnload();
+                case MOVING_TO_UNLOAD -> movingToUnload();
+                case UNLOADING -> unloading();
+                case STOP -> stop();
+                case EMERGENCY_STOP -> emergencyStop();
+                case null, default -> throw new IllegalStateException("Неверное состояние автомата!");
             }
+        }
+    }
+
+    private static void start(){
+        containerState = canChangeStartState() ? ContainerState.FIND_LOAD : ContainerState.STOP;
+    }
+
+    private static void findLoad(){
+        if (!canFinishOperation1() && !canFinishOperation2()){
+            containerState = ContainerState.FIND_UNLOAD;
+            return;
+        }
+
+        int operation;
+        int operationIndex;
+
+        if (canFinishOperation1()){
+            operation = words[0];
+            operationIndex = 0;
+
+            indexR = findIndex(operation, operationIndex);
+            containerState = ContainerState.MOVING_TO_LOAD;
+            return;
+        }
+    }
+
+    private static byte findIndex(int operation, int operationIndex){
+        if ((operation & 1) != 0 && informationSensors.getDRi(0)){
+            operation &= ~1;
+            words[operationIndex] = operation;
+            return 0;   // R1
+        } else if ((operation & 1 << 1) != 0 && informationSensors.getDRi(1)) {
+            operation &= ~(1 << 1);
+            words[operationIndex] = operation;
+            return 1;   // R2
+        } else if ((operation & 1 << 2) != 0 && informationSensors.getDRi(2)) {
+            operation &= ~(1 << 2);
+            words[operationIndex] = operation;
+            return 2;   // R3
+        } else {
+            IO.println("Ошибка в поиске точки для наполнения из резервуара");
+            IO.println(operation);
+            IO.println(operationIndex);
+            return -1;
         }
     }
 
     private static void movingToLoad(){
+        var activeDPi = informationSensors.getActiveDPi();
+        if (activeDPi == -1)
+            throw new NoSuchElementException("Ни один из DPi неактивен! Бред!");
 
+        if (indexR > activeDPi){
+            controlSensors.moveTransporter(TransporterMoveDirection.MOVE_RIGHT);
+            informationSensors.setDPi(activeDPi, false);
+            informationSensors.setDPi(activeDPi + 1, true);
+            return;
+        } else if (indexR < activeDPi) {
+            controlSensors.moveTransporter(TransporterMoveDirection.MOVE_LEFT);
+            informationSensors.setDPi(activeDPi, false);
+            informationSensors.setDPi(activeDPi - 1, true);
+        }
+        if (indexR != activeDPi)
+            return;
+
+        controlSensors.moveTransporter(TransporterMoveDirection.IDLE);
+        indexR = -1;
+        containerState = ContainerState.LOADING;
+
+        /*if (index > getActiveDPi()){
+            moveTransporter(TransporterMoveDirection.MOVE_RIGHT);
+        } else if (index < getActiveDPi()){
+            moveTransporter(TransporterMoveDirection.MOVE_LEFT);
+        }
+
+        setActiveDPi(index);
+        moveTransporter(TransporterMoveDirection.IDLE);
+        containerState = ContainerState.LOADING;*/
     }
 
     private static void loading(){
+
+    }
+
+    private static void findUnload(){
 
     }
 
@@ -153,16 +132,53 @@ public class StateController {
 
     }
 
+    private static void stop(){
+
+    }
+
     private static void emergencyStop(){
 
     }
 
     // region Проверки на доступность выполнение хотя бы одной операции
-    public static boolean shouldStayInIdle() {
-        boolean cannotOp1 = Dj[5] || DRi[0] || DRi[2];  // Нельзя выполнить операцию1
-        boolean cannotOp2 = Dj[2] || DRi[0] || DRi[1];  // Нельзя выполнить операцию2
+    public static boolean canChangeStartState() {
+        int testOp1 = 0;
+        testOp1 = setBit(testOp1, 0, informationSensors.getDRi(0));
+        testOp1 = setBit(testOp1, 1, informationSensors.getDRi(1));
+        testOp1 = setBit(testOp1, 2, informationSensors.getDRi(2));
 
-        return cannotOp1 && cannotOp2;  // Нельзя выполнить НИ ОДНУ операцию
+        int testOp2 = 0;
+        testOp2 = setBit(testOp2, 0, informationSensors.getDRi(0));
+        testOp2 = setBit(testOp2, 1, informationSensors.getDRi(1));
+        testOp2 = setBit(testOp2, 2, informationSensors.getDRi(2));
+
+        boolean cannotOp1 = informationSensors.getDj(words[1]) && (words[0] & testOp1) != words[0];
+        boolean cannotOp2 = informationSensors.getDj(words[3]) && (words[2] & testOp2) != words[2];
+
+        return cannotOp1 || cannotOp2;
+    }
+
+    private static boolean canFinishOperation1(){
+        return words[0] != 0 && !informationSensors.getDj(words[1]);
+    }
+
+    private static boolean canFinishOperation2(){
+        return words[2] != 0 && !informationSensors.getDj(words[3]);
     }
     // endregion
+
+
+
+
+
+
+    private static boolean isBit(int word, int index){
+        return (word & 1 << index) != 0;
+    }
+    private static int setBit(int word, int index, boolean value){
+        word &= ~(1 << index);
+        if (value)
+            word |= 1 << index;
+        return word;
+    }
 }
