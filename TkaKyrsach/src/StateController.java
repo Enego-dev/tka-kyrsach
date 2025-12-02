@@ -66,7 +66,7 @@ public class StateController {
 
         for (int i = 0; i < 3; i++) {
             if (isBit(currentTankMask, i)){
-                indexPi = i;
+                indexPi = i + 1;
                 containerState = ContainerState.MOVE_TO_TANK;
                 return;
             }
@@ -90,7 +90,7 @@ public class StateController {
     }
 
     private static void loading(){
-        if (informationSensors.getDVi(indexPi))
+        if (informationSensors.getDVi(indexPi - 1))
             throw new RuntimeException("Вроде проверялось, что есть содержимое в резервуаре!");
 
         controlSensors.openValve(indexPi);
@@ -100,7 +100,7 @@ public class StateController {
         // обязательно обновить состояние
         iscContainerFull = true;
         int index = currentOperation == AvailableOperation.OPERATION_1 ? 0 : 2;
-        words[index] = setBit(currentTankMask, indexPi, false);
+        words[index] = setBit(words[index], indexPi - 1, false);
 
         if (getAvailableOperation() == currentOperation){
             containerState = ContainerState.HANDLE_TANKS;
@@ -111,6 +111,7 @@ public class StateController {
 
     private static void moveToUnload(){
         indexPi = getDPiByDj(getDjByOperation(currentOperation));
+        moveContainer();
         if (informationSensors.getActiveDPi() != indexPi)
             return;
 
@@ -119,11 +120,18 @@ public class StateController {
 
     private static void rotate(){
         if (iscContainerFull){
-            var index = getDjByOperation(currentOperation);
-            if (0 <= index && index <= 3)
-                controlSensors.rotateTransporter(ContainerRotateDirection.ROTATE_RIGHT);
-            else if (4 <= index && index <= 7)
+            var bunkerNumber = getDjByOperation(currentOperation);
+            // ПРОВЕРКА ПО ЗАДАНИЮ: бункер не должен быть заполнен!
+            if (informationSensors.getDj(bunkerNumber)) {
+                // Бункер заполнен → авария или пропуск
+                containerState = ContainerState.EMERGENCY_STOP;
+                return;
+            }
+
+            if (0 <= bunkerNumber && bunkerNumber <= 3)
                 controlSensors.rotateTransporter(ContainerRotateDirection.ROTATE_LEFT);
+            else if (4 <= bunkerNumber && bunkerNumber <= 7)
+                controlSensors.rotateTransporter(ContainerRotateDirection.ROTATE_RIGHT);
 
             containerState = ContainerState.UNLOADING;
         } else {
@@ -138,7 +146,8 @@ public class StateController {
             iscContainerFull = false;
         }
         IO.println("Разгрузка завершена!");
-        informationSensors.setDj(indexPi, true);
+        var bunkerNumber = getDjByOperation(currentOperation);
+        informationSensors.setDj(bunkerNumber, true);
         containerState = ContainerState.ROTATE;
     }
 
@@ -162,9 +171,11 @@ public class StateController {
     }
 
     private static AvailableOperation getAvailableOperation(){
-        if (words[0] != 0 && !informationSensors.getDj(words[1]) && (words[1] & getRiMask()) == 0){
+        int bunker1 = words[1];
+        int bunker2 = words[3];
+        if (words[0] != 0 && !informationSensors.getDj(bunker1) && (words[0] & getRiMask()) == 0){
             return AvailableOperation.OPERATION_1;
-        } else if (words[2] != 0 && !informationSensors.getDj(words[3]) && (words[2] & getRiMask()) == 0) {
+        } else if (words[2] != 0 && !informationSensors.getDj(bunker2) && (words[2] & getRiMask()) == 0) {
             return AvailableOperation.OPERATION_2;
         } else {
             return AvailableOperation.NONE;
@@ -172,7 +183,8 @@ public class StateController {
     }
 
     private static int getDjByOperation(AvailableOperation currentOperation){
-        return currentOperation == AvailableOperation.OPERATION_1 ? words[1] : words[3];
+        int dj = currentOperation == AvailableOperation.OPERATION_1 ? words[1] : words[3];
+        return dj;
     }
     private static int getDPiByDj(int dj){
         return switch (dj){
