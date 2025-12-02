@@ -4,7 +4,7 @@ import states.ContainerRotateDirection;
 import states.TransporterMoveDirection;
 
 public class ControlSensors {
-    private boolean[] Vi = new boolean[3];    // Открыть (1) или закрыть (0) задвижку резервуаров -- индексирование с 0 до 2
+    private boolean[] Vi = new boolean[3];    // Открыть (true) или закрыть (false) задвижку резервуаров
     private boolean MR = false;   // Транспортер вправо 0-1
     private boolean ML = false;   // Транспортер влево 0-1
     private boolean MKR = false;  // Повернуть контейнер вправо для сброса в B0-B3 0-1
@@ -74,5 +74,9 @@ public class ControlSensors {
 
     public void processEmergencyStop(){
         EMERGENCY_STOP = true;
+    }
+
+    public boolean getEmergencyStop(){
+        return EMERGENCY_STOP;
     }
 }

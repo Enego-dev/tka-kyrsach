@@ -2,26 +2,21 @@ package sensors;
 
 import states.ContainerRotateDirection;
 
-import java.util.List;
-
 public class InformationSensors {
+    // false - есть материал, true - нет материала
     private boolean[] DRi = new boolean[] {false, false, false};  // Сработал ли датчик пустоты в резервуаре Ri
+    // false - закрыт, true - открыт
     private boolean[] DVi = new boolean[] {false, false, false};  // Открыт ли резервуар Ri
     private boolean[] DPi = new boolean[] {true, false, false, false};   // Находится ли контейнер в позиции P0...P3
     private boolean DKL = false; // Поворачивается ли контейнер влево
     private boolean DKR = false; // Поворачивается ли контейнер вправо
     private boolean DN = true;   // В нейтральном ли положении контейнер
+    // false - не заполнен, true - заполнен
     private boolean[] Dj = new boolean[8];   // Заполнен ли бункер Dj
     private boolean BK0 = false; // Вышел ли контейнер за заданный левый предел
     private boolean BK1 = false; // Вышел ли контейнер за заданный правый предел
     private boolean DT = false;  // Сработал ли таймер заполнения
     private boolean AT = false;  // Сработал ли аварийный сигнал от таймера превышения ожидаемого времени операции
-
-    private ControlSensors controlSensors;
-
-    public void setControlSensors(ControlSensors controlSensors){
-        this.controlSensors = controlSensors;
-    }
 
     /// Получить состояния датчика резервуара
     public boolean getDRi(int index){

@@ -1,14 +1,14 @@
 package states;
 
 public enum ContainerState {
-    INITIALIZATION,
-    PREPARATION,
+    INITIALIZE,
     WAITING,
-    FIND_LOAD_POSITION,
-    MOVE_TO_LOAD_POSITION,
-    LOAD,
-    FIND_UNLOAD_POSITION,
-    MOVE_TO_UNLOAD_POSITION,
-    UNLOAD,
-    END
+    HANDLE_TANKS,
+    MOVE_TO_TANK,
+    LOADING,
+    MOVE_TO_UNLOAD,
+    ROTATE,
+    UNLOADING,
+    END,
+    EMERGENCY_STOP
 }

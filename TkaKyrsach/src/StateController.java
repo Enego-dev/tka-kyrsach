@@ -1,175 +1,218 @@
 import sensors.ControlSensors;
 import sensors.InformationSensors;
 import states.AvailableOperation;
+import states.ContainerRotateDirection;
 import states.ContainerState;
 import states.TransporterMoveDirection;
 
 public class StateController {
-    private static ControlSensors controlSensors;
-    private static InformationSensors informationSensors;
-    private static ContainerState containerState;
+    private static ControlSensors controlSensors = null;
+    private static InformationSensors informationSensors = null;
+    private static ContainerState containerState = null;
     private static int[] words = new int[] {0b101, 0b101, 0b011, 0b010};
-    private static byte fillTimer = 15;    // таймер заполнения на 15 секунд
-    private static byte emergencyTimer = 20;   // аварийный таймер операции на 20 секунд
-
-    private static AvailableOperation currentOperation = AvailableOperation.NONE;
-    private static int operationCodeToPerform = -1;
-    private static int operationIndexToPerform = -1;
-    private static byte indexP = -1;
+    private static AvailableOperation currentOperation = null;
+    private static int indexPi = -1;
+    private static int currentTankMask = -1;
+    private static boolean iscContainerFull = false;
 
     static void main() {
-        containerState = ContainerState.START;
+        containerState = ContainerState.INITIALIZE;
         controlSensors = new ControlSensors();
         informationSensors = new InformationSensors();
         controlSensors.setInformationSensors(informationSensors);
-        informationSensors.setControlSensors(controlSensors);
-
+        //informationSensors.setControlSensors(controlSensors);
+        containerState = ContainerState.WAITING;
 
 
         while (true){
+            if (informationSensors.getAT() || informationSensors.getDT() || controlSensors.getEmergencyStop()){
+                containerState = ContainerState.EMERGENCY_STOP;
+            }
+
             switch (containerState){
-                case START -> start();
-                case FIND_LOAD -> findLoad();
-                case MOVING_TO_LOAD -> movingToLoad();
+                case WAITING -> waiting();
+                case HANDLE_TANKS -> handleTanks();
+                case MOVE_TO_TANK -> moveToTank();
                 case LOADING -> loading();
-                case FIND_UNLOAD -> findUnload();
-                case MOVING_TO_UNLOAD -> movingToUnload();
+                case MOVE_TO_UNLOAD -> moveToUnload();
+                case ROTATE -> rotate();
                 case UNLOADING -> unloading();
-                case STOP -> stop();
+                case END -> end();
                 case EMERGENCY_STOP -> emergencyStop();
-                case null, default -> throw new IllegalStateException("Неверное состояние автомата!");
+                case null, default -> throw new RuntimeException("Че-то с автоматом пошло не так(");
             }
         }
     }
 
-    private static void start(){
-        containerState = canChangeStartState() ? ContainerState.FIND_LOAD : ContainerState.STOP;
+    private static void waiting(){
+        var operation = getAvailableOperation();
+        if (operation == AvailableOperation.NONE){
+            containerState = ContainerState.END;
+            return;
+        }
+
+        currentOperation = operation;
+        containerState = ContainerState.HANDLE_TANKS;
     }
 
-    /// Отвечает только за indexR
-    private static void findLoad(){
-        currentOperation = getAvailableOperation();
+    private static void handleTanks(){
+        // скорее всего так надо
+        indexPi = -1;
 
         switch (currentOperation){
-            case OPERATION_1 -> {
-                operationCodeToPerform = words[0];
-                operationIndexToPerform = 0;
-            }
-            case OPERATION_2 -> {
-                operationCodeToPerform = words[2];
-                operationIndexToPerform = 2;
-            }
-            case NONE -> {
-                containerState = ContainerState.FIND_UNLOAD;
-            }
-            case null, default -> throw new RuntimeException("Беда беда беда системе((");
+            case OPERATION_1 -> currentTankMask = words[0];
+            case OPERATION_2 -> currentTankMask = words[2];
         }
 
-        if (isBit(operationCodeToPerform, 0)){
-            indexP = 1;
-        } else if (isBit(operationCodeToPerform, 1)) {
-            indexP = 2;
-        } else if (isBit(operationCodeToPerform, 2)) {
-            indexP = 3;
-        } else {
-            throw new RuntimeException("Ну, найти индекс Ri не удалось(");
+        for (int i = 0; i < 3; i++) {
+            if (isBit(currentTankMask, i)){
+                indexPi = i;
+                containerState = ContainerState.MOVE_TO_TANK;
+                return;
+            }
         }
 
-        containerState = ContainerState.MOVING_TO_LOAD;
+        if (indexPi == -1)
+            throw new RuntimeException("Все же indexRi не нашелся!");
     }
 
-    private static void movingToLoad(){
+    private static void moveToTank(){
         var activeDPi = informationSensors.getActiveDPi();
-        if (activeDPi == -1){
-            throw new RuntimeException("activeDPi = -1!!!");
-        }
+        if (activeDPi == -1)
+            throw new RuntimeException("Active DPi = -1!");
 
-        if (indexP > activeDPi){
-            controlSensors.moveTransporter(TransporterMoveDirection.MOVE_RIGHT);
-            informationSensors.setDPi(activeDPi, false);
-            informationSensors.setDPi(activeDPi + 1, true);
-        } else if (indexP < activeDPi) {
-            controlSensors.moveTransporter(TransporterMoveDirection.MOVE_LEFT);
-            informationSensors.setDPi(activeDPi, false);
-            informationSensors.setDPi(activeDPi - 1, true);
-        }
+        moveContainer();
 
-        if (indexP != activeDPi)
+        if (activeDPi != indexPi)
             return;
 
-        controlSensors.moveTransporter(TransporterMoveDirection.IDLE);
         containerState = ContainerState.LOADING;
     }
 
     private static void loading(){
-        if (informationSensors.getDRi(indexP - 1)){
-            throw new RuntimeException("Ожидалось, что резервуар будет наполнен, а он пустой!");
+        if (informationSensors.getDVi(indexPi))
+            throw new RuntimeException("Вроде проверялось, что есть содержимое в резервуаре!");
+
+        controlSensors.openValve(indexPi);
+        IO.println("Загрузка прошла успешно!");
+        controlSensors.closeValve(indexPi);
+
+        // обязательно обновить состояние
+        iscContainerFull = true;
+        int index = currentOperation == AvailableOperation.OPERATION_1 ? 0 : 2;
+        words[index] = setBit(currentTankMask, indexPi, false);
+
+        if (getAvailableOperation() == currentOperation){
+            containerState = ContainerState.HANDLE_TANKS;
+        } else if (getAvailableOperation() != currentOperation) {
+            containerState = ContainerState.MOVE_TO_UNLOAD;
         }
-
-        controlSensors.openValve(indexP - 1);
-        controlSensors.closeValve(indexP - 1);
-        indexP = -1;
-        containerState = ContainerState.FIND_LOAD;
     }
 
-    private static void findUnload(){
+    private static void moveToUnload(){
+        indexPi = getDPiByDj(getDjByOperation(currentOperation));
+        if (informationSensors.getActiveDPi() != indexPi)
+            return;
 
+        containerState = ContainerState.ROTATE;
     }
 
-    private static void movingToUnload(){
+    private static void rotate(){
+        if (iscContainerFull){
+            var index = getDjByOperation(currentOperation);
+            if (0 <= index && index <= 3)
+                controlSensors.rotateTransporter(ContainerRotateDirection.ROTATE_RIGHT);
+            else if (4 <= index && index <= 7)
+                controlSensors.rotateTransporter(ContainerRotateDirection.ROTATE_LEFT);
 
+            containerState = ContainerState.UNLOADING;
+        } else {
+            controlSensors.rotateTransporter(ContainerRotateDirection.NORMAL);
+            containerState = ContainerState.WAITING;
+        }
     }
 
     private static void unloading(){
-
-    }
-
-    private static void stop(){
-
+        while (iscContainerFull){
+            IO.println("разгрузка");
+            iscContainerFull = false;
+        }
+        IO.println("Разгрузка завершена!");
+        informationSensors.setDj(indexPi, true);
+        containerState = ContainerState.ROTATE;
     }
 
     private static void emergencyStop(){
-
+        containerState = ContainerState.END;
     }
 
-    // region Всякие разные проверки и получения
-    public static boolean canChangeStartState() {
-        return getAvailableOperation() != AvailableOperation.NONE;
+    private static void end(){
+        IO.println("Завершение работы программы...");
+        System.exit(0);
     }
 
-    private static int canPerformOperation(){
-        int testOp = 0;
-        testOp = setBit(testOp, 0, informationSensors.getDRi(0));
-        testOp = setBit(testOp, 1, informationSensors.getDRi(1));
-        testOp = setBit(testOp, 2, informationSensors.getDRi(2));
-        return testOp;
+
+    // region Методы - условия входа в разные состояния автомата
+    private static int getRiMask(){
+        var mask = 0;
+        mask = setBit(mask, 0, informationSensors.getDRi(0));
+        mask = setBit(mask, 1, informationSensors.getDRi(1));
+        mask = setBit(mask, 2, informationSensors.getDRi(2));
+        return mask;
     }
 
     private static AvailableOperation getAvailableOperation(){
-        // если есть какие-то неотработанные резервуары и
-        // и если резервуары
-        if (words[0] != 0 && (words[0] & canPerformOperation()) != words[0] && !informationSensors.getDj(words[1])){
+        if (words[0] != 0 && !informationSensors.getDj(words[1]) && (words[1] & getRiMask()) == 0){
             return AvailableOperation.OPERATION_1;
-        } else if (words[2] != 0 && (words[2] & canPerformOperation()) != words[2] && !informationSensors.getDj(words[3])) {
+        } else if (words[2] != 0 && !informationSensors.getDj(words[3]) && (words[2] & getRiMask()) == 0) {
             return AvailableOperation.OPERATION_2;
         } else {
             return AvailableOperation.NONE;
+        }
+    }
+
+    private static int getDjByOperation(AvailableOperation currentOperation){
+        return currentOperation == AvailableOperation.OPERATION_1 ? words[1] : words[3];
+    }
+    private static int getDPiByDj(int dj){
+        return switch (dj){
+            case 0,7 -> 0;
+            case 1,6 -> 1;
+            case 2,5 -> 2;
+            case 3,4 -> 3;
+            default -> throw new RuntimeException("Невозможно получить позицию DPi от Dj");
+        };
+    }
+
+    private static void moveContainer(){
+        var activeDPi = informationSensors.getActiveDPi();
+        if (activeDPi == -1)
+            throw new RuntimeException("Active DPi = -1!");
+
+        if (indexPi > activeDPi){
+            controlSensors.moveTransporter(TransporterMoveDirection.MOVE_RIGHT);
+            informationSensors.setDPi(activeDPi, false);
+            informationSensors.setDPi(activeDPi + 1, true);
+        } else if (indexPi < activeDPi) {
+            controlSensors.moveTransporter(TransporterMoveDirection.MOVE_LEFT);
+            informationSensors.setDPi(activeDPi, false);
+            informationSensors.setDPi(activeDPi - 1, true);
         }
     }
     // endregion
 
 
 
-
-
-
+    // region Методы для работы с битами
     private static boolean isBit(int word, int index){
         return (word & 1 << index) != 0;
     }
+
     private static int setBit(int word, int index, boolean value){
         word &= ~(1 << index);
         if (value)
             word |= 1 << index;
         return word;
     }
+    // endregion
 }
