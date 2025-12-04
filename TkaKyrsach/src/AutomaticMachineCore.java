@@ -18,7 +18,7 @@ public class AutomaticMachineCore {
     private boolean[] DRi = new boolean[] {false, false, false};  // Сработал ли датчик пустоты в резервуаре Ri
     // false - закрыт, true - открыт
     private boolean[] DVi = new boolean[] {false, false, false};  // Открыт ли клапан резервуара Ri
-    private boolean[] DPi = new boolean[4];   // Находится ли контейнер в позиции P0...P3
+    private boolean[] DPi = new boolean[] {true, false, false, false};   // Находится ли контейнер в позиции P0...P3
     private boolean DKL = false; // Поворачивается ли контейнер влево
     private boolean DKR = false; // Поворачивается ли контейнер вправо
     private boolean DN = true;   // В нейтральном ли положении контейнер
@@ -32,15 +32,19 @@ public class AutomaticMachineCore {
 
 
     enum ContainerState {
-        INITIALIZING,
+        INIT,
+        IDLE,
         PROCESS_CONTROL_CODE,
-        MOVING,
-        LOADING,
-        ROTATING,
-        UNLOADING,
-        END,
+        MOVE_TO_POSITION,
+        OPEN_VALVE,
+        WAIT_TIMER,
+        CLOSE_VALVE,
+        ROTATE_TO_BUNKER,
+        UNLOAD,
+        ROTATE_TO_NORMAL,
         COMPLETE_OPERATION,
-        EMERGENCY_STOP
+        EMERGENCY_STOP,
+        END
     }
 
 
@@ -154,9 +158,21 @@ public class AutomaticMachineCore {
         }
 
         // находится ли контейнер возле бункера?
-        var currentPosition = getDPByDj(indexDj);
+        var currentPosition = switch (indexDj){
+            case 0, 7 -> 0;
+            case 1, 6 -> 1;
+            case 2, 5 -> 2;
+            case 3,4 -> 3;
+            default -> throw new IllegalArgumentException("indexDj out of range [0..7]");
+        };
+
         if (!DPi[currentPosition]){
             throw new IllegalArgumentException("Container is not nearby this bunker!");
+        }
+
+        if (Dj[indexDj]){
+            cannotUnload = true;
+            //throw new IllegalArgumentException("Bunker is full!");
         }
 
         if (indexDj <= 3){
@@ -175,20 +191,6 @@ public class AutomaticMachineCore {
         MKL = DKL = MKR = DKR = false;
     }
 
-    private int getDPByDj(int indexDj){
-        if (indexDj < 0 || indexDj > 7){
-            throw new IllegalArgumentException("indexDP out of range [0..7]");
-        }
-
-        return switch (indexDj){
-            case 0, 7 -> 0;
-            case 1, 6 -> 1;
-            case 2, 5 -> 2;
-            case 3,4 -> 3;
-            default -> throw new IllegalArgumentException("indexDj out of range [0..7]");
-        };
-    }
-
     private void setEmergencyStop(){
         EMERGENCY_STOP = true;
     }
@@ -196,162 +198,144 @@ public class AutomaticMachineCore {
 
 
 
-    private ContainerState state;
     private int[] words;
-    private boolean machineStopped;
-    private boolean isContainerEmpty;   // изменить это в методе loading и unloading
+    private ContainerState state;
     private int operationIndex;
-    private int operationMask;
-    private int currentDPi = -1;
+    private LoadStruct loadStruct;
+    private int currentDPi;
+    private boolean cannotUnload;   // все ведет к добавлению cannotUnload
 
-    public void initialize(int[] words){
+    public AutomaticMachineCore(int[] words){
         if (words.length != 4){
             throw new IllegalArgumentException("words.length != 4");
         }
 
         this.words = words;
-        operationIndex = -1;
-        operationMask = -1;
-        isContainerEmpty = true;
-        machineStopped = false;
-        // Перемещаю контейнер в P0
-        state = ContainerState.PROCESS_CONTROL_CODE;
     }
 
     public void run(){
-        while (!machineStopped){
-            machineStopped = words[0] == -1 && words[1] == -1 && words[2] == -1 && words[3] == -1;
+        while (true){   // все УК == -1: все операции отработаны
             switch (state){
-                case INITIALIZING -> {continue;}
+                case IDLE -> idle();
                 case PROCESS_CONTROL_CODE -> processControlCode();
-                case MOVING -> moving();
+                case MOVE_TO_POSITION -> moveToPosition();
+                // Загрузка:
+
+                // Разгрузка:
+                case ROTATE_TO_BUNKER -> rotateToBunker();
+                case UNLOAD -> unload();
+                case ROTATE_TO_NORMAL -> rotateToNormal();
+
+                case COMPLETE_OPERATION -> completeOperation();
+
+                case EMERGENCY_STOP -> emergencyStop();
+                case END -> end();
+                case null -> initialize();
+                default -> throw new RuntimeException("unqe ungrrr");
             }
         }
     }
 
-    // region PROCESS_CODE_OPERATION methods methods
+
+
+    // region AutomaticMachineMethods
+    // Начальные методы
+    private void initialize(){
+        operationIndex = currentDPi = -1;
+        loadStruct = null;
+        state = ContainerState.IDLE;
+    }
+
+    private void idle(){
+        state = (words[0] == -1 && words[1] == -1 && words[2] == -1 && words[3] == -1) || operationIndex == 3 ? ContainerState.END : ContainerState.PROCESS_CONTROL_CODE;
+    }
+
+    // Методы циклы
+    // Сейчас цель: закончить разгрузку полностью
     private void processControlCode(){
-        if (!canDoneCurrentOperation()){
-            findNextOperation();
+        // условие на довыполнение операции разгрузки будет позже
+
+        operationIndex++;
+        if (operationIndex % 2 == 0){   // ЗАГРУЗКА
+            IO.println("ОПЕРАЦИИ ЗАГРУЗКИ ПОКА НЕДОСТУПНЫ, ПРОПУСК УПРАВЛЯЮЩЕГО КОДА!");
             return;
-        }
-
-        // закончил я на том, что нужно внимательно посмотреть код первого состояния, определить, где обнулять переменные
-        IO.println("--- PROCESSING CONTROL CODE\t--- operation index: " + operationIndex + " execution code: " + operationMask);
-        executeOperation();
-        IO.println();
-    }
-
-    private boolean canDoneCurrentOperation(){
-        // нет операции для завершения, ищем новую ИЛИ если операция полностью отработана, ищем новую
-        return (operationMask != -1) && (operationMask != 0 || words[operationIndex] == 0);
-    }
-
-    private void findNextOperation(){
-        // первое вхождение после инициализации
-        if (operationIndex == -1){
-            operationIndex = 0;
-            operationMask = words[operationIndex];
-            return;
-        }
-
-        try {
-            while (words[operationIndex] == -1){
-                operationIndex++;
-            }
-            operationMask = words[operationIndex];
-        } catch (ArrayIndexOutOfBoundsException e){
-            IO.println("Operation Index out of range [0..3]. So, there is no available operation to execute. Stopping machine...");
-            machineStopped = true;
-            //throw new IllegalArgumentException("Operation Index out of range [0..3]");
-        }
-    }
-
-    private void executeOperation(){
-        // проверять в самом начале код 000
-        if (operationMask == 0 && words[operationIndex] == 0){
-            if (!isContainerEmpty){
-                IO.println("--- EXECUTION CODE 000 STATUS: CONTAINER IS NOT EMPTY, GOING TO THE UTILIZATION BUNKER (D0)");
+        } else {    // ВЫГРУЗКА
+            if (words[operationIndex] == 0){    // УПРАВЛЯЮЩИЙ КОД 000 = В ОТХОДЫ
                 currentDPi = 0;
-                state = ContainerState.MOVING;
-                return;
+            } else {    // В ИНЫХ СЛУЧАЯХ В БУНКЕР
+                currentDPi = switch (words[operationIndex]){
+                    case 0, 7 -> 0;
+                    case 1, 6 -> 1;
+                    case 2, 5 -> 2;
+                    case 3, 4 -> 3;
+                    default -> throw new IllegalArgumentException("Ну у меня нет объяснений как это тут оказалось...");
+                };
             }
         }
 
-        var isLoading = operationIndex % 2 == 0;
-        var operationType = isLoading ? "LOADING" : "UNLOADING";
-        var binOp = Integer.toBinaryString(words[operationIndex]);
-        if (binOp.length() > 2)
-            binOp = binOp.substring(binOp.length() - 3);
-        var statusInfo = "--- EXECUTION CODE " + binOp + " STATUS: ";
-
-        IO.println("--- EXECUTION CONTROL CODE\t--- operation index: " + operationIndex + " execution code: " + binOp + " status: " + operationType);
-
-        if (isLoading){
-            if (operationMask == 0 && words[operationIndex] == 0){
-                IO.println("--- EXECUTION CODE 000 STATUS: SKIP OPERATION... NOTHING TO EXECUTE");
-                completeOperation();
-                return;
-            }
-
-            // Если есть Ri, то начинаем с него и сразу показываем, что её больше не делать в следующем цикле
-            for (int i = 0; i < 3; i++) {
-                if (isBit(operationMask, i)){
-                    operationMask = setBit(operationMask, i, false);
-                    currentDPi = i + 1;
-                    IO.println(statusInfo + "MOVING TO LOAD IN R" + currentDPi);
-                    state = ContainerState.MOVING;
-                    break;
-                }
-            }
-
-            // completeOperation(); вызвать эту дрисню в состоянии loading
-        } else {
-            if (isContainerEmpty){
-                IO.println(statusInfo + "SKIP OPERATION... EMPTY CONTAINER");
-                completeOperation();
-                return;
-            }
-
-            currentDPi = operationMask;
-            IO.println(statusInfo + "MOVING TO THE BUNKER: " + currentDPi);
-            state = ContainerState.MOVING;
-            // completeOperation(); вызвать эту дрисню в состоянии unoading
-        }
+        state = ContainerState.MOVE_TO_POSITION;
     }
 
-    /// Вызов или только после обработки
-    private void completeOperation() {
-        if (operationIndex < 0 || operationIndex > 3)
+    private void moveToPosition(){
+        moveTransporter(currentDPi);
+        state = operationIndex % 2 == 0 ? ContainerState.OPEN_VALVE : ContainerState.ROTATE_TO_BUNKER;
+    }
+
+    // Загрузка
+
+    // Выгрузка
+    private void rotateToBunker(){
+        rotateContainerToBunker(words[operationIndex]);
+
+        // придется сбросить в отходы, если бункер переполнен)
+        if (cannotUnload){
+            cannotUnload = false;
+            IO.println("Тот бункер заполнен, скидываю в отходы)");
+            currentDPi = 0;
+            words[operationIndex] = 0;  // ахахахах))))
+            state = ContainerState.MOVE_TO_POSITION;
             return;
+        }
 
-        words[operationIndex] = -1;
-        operationMask = -1;
+        state = ContainerState.UNLOAD;
+    }
+
+    private void unload(){
+        IO.println("Содержимое успешно выгружено!");
+        state = ContainerState.ROTATE_TO_NORMAL;
+    }
+
+    private void rotateToNormal(){
+        rotateContainerToNormal();
+        state = ContainerState.COMPLETE_OPERATION;
+    }
+
+
+
+    private void completeOperation(){
+        cannotUnload = false;
         currentDPi = -1;
-    }
-    // endregion
-
-    // region MOVING methods
-    private void moving(){
-        //System.exit(1);
-        state = ContainerState.PROCESS_CONTROL_CODE;
-    }
-    // endregion
-
-
-
-
-
-    // region Методы для работы с битами
-    private static boolean isBit(int word, int index){
-        return (word & 1 << index) != 0;
+        words[operationIndex] = -1;
+        if (operationIndex % 2 == 0)
+            loadStruct = null;
+        state = ContainerState.IDLE;
     }
 
-    private static int setBit(int word, int index, boolean value){
-        word &= ~(1 << index);
-        if (value)
-            word |= 1 << index;
-        return word;
+
+
+    // Методы завершения работы
+    private void emergencyStop(){
+        state = ContainerState.END;
+    }
+
+    private void end(){
+        if (!EMERGENCY_STOP){
+            IO.println("Конечный автомат завершил свою работу!");
+            System.exit(1337);
+        } else {
+            IO.println("Аварийная остановка конечного автомата!");
+            System.exit(1488);
+        }
     }
     // endregion
 }

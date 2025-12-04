@@ -1,15 +1,13 @@
 import sensors.ControlSensors;
 import sensors.InformationSensors;
-import states.AvailableOperation;
 import states.ContainerRotateDirection;
 import states.ContainerState;
 import states.TransporterMoveDirection;
 
 public class StateController {
     static void main() {
-        var automaticMachine = new AutomaticMachineCore();
+        var automaticMachine = new AutomaticMachineCore(new int[] {0b101, 0b101, 0b011, 0b010});
         // 0b101, 0b101, 0b011, 0b010
-        automaticMachine.initialize(new int[] {0b100, 0,0,0});
         automaticMachine.run();
     }
 
