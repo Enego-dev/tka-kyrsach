@@ -48,7 +48,7 @@ public class AutomaticMachineCore {
     }
 
 
-
+    // Убрать ненужные ошибки, которые ломают автомат
     // region Методы конечного автомата
     private void openValve(int indexDP){
         if (indexDP < 0 || indexDP > 3){
@@ -96,7 +96,7 @@ public class AutomaticMachineCore {
             return;
         }
 
-        DRi[valveIndex] = DVi[valveIndex] = false;
+        Vi[valveIndex] = DVi[valveIndex] = false;
     }
 
     private int getValveIndex(int indexDP) {
@@ -119,6 +119,24 @@ public class AutomaticMachineCore {
             return;
         }
 
+        int activeDPi = getActiveDPi();
+
+        if (indexDP > activeDPi && !BK1){
+            activeDPi += 1;
+            setDPi(activeDPi);
+            MR = true;
+            ML = false;
+        } else if (indexDP < activeDPi && !BK0){
+            activeDPi -= 1;
+            setDPi(activeDPi);
+            ML = true;
+            MR = false;
+        } else {
+            setEmergencyStop();
+        }
+    }
+
+    private int getActiveDPi() {
         // получим индекс DP, где сейчас контейнер
         int activeDPi = -1;
         for (int i = 0; i < DPi.length; i++) {
@@ -127,20 +145,7 @@ public class AutomaticMachineCore {
                 break;  // причем он только один из 4
             }
         }
-
-        while (!DPi[indexDP]){
-            if (indexDP > activeDPi){
-                activeDPi += 1;
-                setDPi(activeDPi);
-                MR = true;
-                ML = false;
-            } else if (indexDP < activeDPi){
-                activeDPi -= 1;
-                setDPi(activeDPi);
-                ML = true;
-                MR = false;
-            }
-        }
+        return activeDPi;
     }
 
     private void setDPi(int indexDP){
@@ -148,7 +153,7 @@ public class AutomaticMachineCore {
             throw new IllegalArgumentException("indexDP out of range [0..3]");
         }
 
-        DPi[0] = DPi[1] = DPi[2] = false;
+        DPi[0] = DPi[1] = DPi[2] = DPi[3] = false;
         DPi[indexDP] = true;
     }
 
@@ -158,13 +163,7 @@ public class AutomaticMachineCore {
         }
 
         // находится ли контейнер возле бункера?
-        var currentPosition = switch (indexDj){
-            case 0, 7 -> 0;
-            case 1, 6 -> 1;
-            case 2, 5 -> 2;
-            case 3,4 -> 3;
-            default -> throw new IllegalArgumentException("indexDj out of range [0..7]");
-        };
+        var currentPosition = getDPiByDj(indexDj);
 
         if (!DPi[currentPosition]){
             throw new IllegalArgumentException("Container is not nearby this bunker!");
@@ -172,6 +171,7 @@ public class AutomaticMachineCore {
 
         if (Dj[indexDj]){
             cannotUnload = true;
+            return;
             //throw new IllegalArgumentException("Bunker is full!");
         }
 
@@ -184,6 +184,16 @@ public class AutomaticMachineCore {
             MKL = DKL = false;
         }
         DN = false;
+    }
+
+    private static int getDPiByDj(int indexDj) {
+        return switch (indexDj){
+            case 0, 7 -> 0;
+            case 1, 6 -> 1;
+            case 2, 5 -> 2;
+            case 3,4 -> 3;
+            default -> throw new IllegalArgumentException("indexDj out of range [0..7]");
+        };
     }
 
     private void rotateContainerToNormal(){
@@ -214,7 +224,7 @@ public class AutomaticMachineCore {
     }
 
     public void run(){
-        while (true){   // все УК == -1: все операции отработаны
+        while (!allOperationsCompleted() || operationIndex < 4){   // все УК == -1: все операции отработаны
             switch (state){
                 case IDLE -> idle();
                 case PROCESS_CONTROL_CODE -> processControlCode();
@@ -247,7 +257,11 @@ public class AutomaticMachineCore {
     }
 
     private void idle(){
-        state = (words[0] == -1 && words[1] == -1 && words[2] == -1 && words[3] == -1) || operationIndex == 3 ? ContainerState.END : ContainerState.PROCESS_CONTROL_CODE;
+        state = allOperationsCompleted() || operationIndex >= 3 ? ContainerState.END : ContainerState.PROCESS_CONTROL_CODE;
+    }
+
+    private boolean allOperationsCompleted(){
+        return words[0] == -1 && words[1] == -1 && words[2] == -1 && words[3] == -1;
     }
 
     // Методы циклы
@@ -260,17 +274,7 @@ public class AutomaticMachineCore {
             IO.println("ОПЕРАЦИИ ЗАГРУЗКИ ПОКА НЕДОСТУПНЫ, ПРОПУСК УПРАВЛЯЮЩЕГО КОДА!");
             return;
         } else {    // ВЫГРУЗКА
-            if (words[operationIndex] == 0){    // УПРАВЛЯЮЩИЙ КОД 000 = В ОТХОДЫ
-                currentDPi = 0;
-            } else {    // В ИНЫХ СЛУЧАЯХ В БУНКЕР
-                currentDPi = switch (words[operationIndex]){
-                    case 0, 7 -> 0;
-                    case 1, 6 -> 1;
-                    case 2, 5 -> 2;
-                    case 3, 4 -> 3;
-                    default -> throw new IllegalArgumentException("Ну у меня нет объяснений как это тут оказалось...");
-                };
-            }
+            currentDPi = getDPiByDj(words[operationIndex]);
         }
 
         state = ContainerState.MOVE_TO_POSITION;
@@ -278,7 +282,8 @@ public class AutomaticMachineCore {
 
     private void moveToPosition(){
         moveTransporter(currentDPi);
-        state = operationIndex % 2 == 0 ? ContainerState.OPEN_VALVE : ContainerState.ROTATE_TO_BUNKER;
+        if (currentDPi == getActiveDPi())
+            state = operationIndex % 2 == 0 ? ContainerState.OPEN_VALVE : ContainerState.ROTATE_TO_BUNKER;
     }
 
     // Загрузка
