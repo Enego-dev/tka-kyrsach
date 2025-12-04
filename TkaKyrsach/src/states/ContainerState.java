@@ -1,7 +1,7 @@
 package states;
 
 public enum ContainerState {
-    INITIALIZE,
+    /*INITIALIZE,
     WAITING,
     HANDLE_TANKS,
     MOVE_TO_TANK,
@@ -10,5 +10,5 @@ public enum ContainerState {
     ROTATE,
     UNLOADING,
     END,
-    EMERGENCY_STOP
+    EMERGENCY_STOP*/
 }

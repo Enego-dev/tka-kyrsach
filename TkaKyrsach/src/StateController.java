@@ -6,7 +6,14 @@ import states.ContainerState;
 import states.TransporterMoveDirection;
 
 public class StateController {
-    private static ControlSensors controlSensors = null;
+    static void main() {
+        var automaticMachine = new AutomaticMachineCore();
+        // 0b101, 0b101, 0b011, 0b010
+        automaticMachine.initialize(new int[] {0b100, 0,0,0});
+        automaticMachine.run();
+    }
+
+    /*private static ControlSensors controlSensors = null;
     private static InformationSensors informationSensors = null;
     private static ContainerState containerState = null;
     private static int[] words = new int[] {0b101, 0b101, 0b011, 0b010};
@@ -227,4 +234,6 @@ public class StateController {
         return word;
     }
     // endregion
+
+     */
 }
