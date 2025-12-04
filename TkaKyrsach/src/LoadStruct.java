@@ -1,7 +1,7 @@
 public class LoadStruct {
     public int controlCode;
     public int operationMask;
-    // все ведет к добавлению cannotLoad
+    public boolean cannotLoad;// все ведет к добавлению cannotLoad
 
     public LoadStruct(int controlCode){
         if (controlCode == 0)
@@ -16,7 +16,7 @@ public class LoadStruct {
     }
 
     public boolean canCompleteOperation(){
-        return true;
+        return !cannotLoad;
     }
 
     /**
