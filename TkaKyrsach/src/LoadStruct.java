@@ -1,7 +1,6 @@
 public class LoadStruct {
     public int controlCode;
     public int operationMask;
-    public boolean cannotLoad;// все ведет к добавлению cannotLoad
 
     public LoadStruct(int controlCode){
         if (controlCode == 0)
@@ -13,10 +12,6 @@ public class LoadStruct {
 
     public boolean isOperationCompleted(){
         return controlCode != 0 && operationMask == 0;
-    }
-
-    public boolean canCompleteOperation(){
-        return !cannotLoad && !isOperationCompleted();
     }
 
     /**
@@ -37,7 +32,7 @@ public class LoadStruct {
         if (indexDP < 1 || indexDP > 3)
             throw new IllegalArgumentException("Ожидалась позиция DPi[1..3]!");
 
-        operationMask = setBit(operationMask, indexDP - 1, false);
+        operationMask = setBit0(operationMask, indexDP - 1);
     }
 
     // region Методы для работы с битами
@@ -45,10 +40,8 @@ public class LoadStruct {
         return (word & 1 << index) != 0;
     }
 
-    private static int setBit(int word, int index, boolean value){
+    private static int setBit0(int word, int index){
         word &= ~(1 << index);
-        if (value)
-            word |= 1 << index;
         return word;
     }
     // endregion

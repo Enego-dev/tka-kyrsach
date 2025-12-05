@@ -1,6 +1,6 @@
 public class AutomaticMachineCore {
     // открыть (true) или закрыть (false) задвижку резервуаров
-    private boolean[] Vi = new boolean[3];
+    private final boolean[] Vi = new boolean[3];
     // транспортер вправо
     private boolean MR = false;
     // транспортер влево
@@ -15,19 +15,24 @@ public class AutomaticMachineCore {
 
 
     // false - есть материал, true - нет материала
-    private boolean[] DRi = new boolean[] {false, false, false};  // Сработал ли датчик пустоты в резервуаре Ri
+    private final boolean[] DRi = new boolean[] {false, false, false};  // Сработал ли датчик пустоты в резервуаре Ri
     // false - закрыт, true - открыт
-    private boolean[] DVi = new boolean[] {false, false, false};  // Открыт ли клапан резервуара Ri
-    private boolean[] DPi = new boolean[] {true, false, false, false};   // Находится ли контейнер в позиции P0...P3
+    private final boolean[] DVi = new boolean[] {false, false, false};  // Открыт ли клапан резервуара Ri
+    private final boolean[] DPi = new boolean[] {true, false, false, false};   // Находится ли контейнер в позиции P0...P3
     private boolean DKL = false; // Поворачивается ли контейнер влево
     private boolean DKR = false; // Поворачивается ли контейнер вправо
     private boolean DN = true;   // В нейтральном ли положении контейнер
     // false - не заполнен, true - заполнен
-    private boolean[] Dj = new boolean[8];   // Заполнен ли бункер Dj
+    private final boolean[] Dj = new boolean[8];   // Заполнен ли бункер Dj
     private boolean BK0 = false; // Вышел ли контейнер за заданный левый предел
     private boolean BK1 = false; // Вышел ли контейнер за заданный правый предел
     private boolean DT = false;  // Сработал ли таймер заполнения
     private boolean AT = false;  // Сработал ли аварийный сигнал от таймера превышения ожидаемого времени операции
+
+
+
+    private final int OPERATION_TIME = 10;
+    private final int EMERGENCY_OPERATION_TIME = 15;
 
 
 
@@ -48,88 +53,37 @@ public class AutomaticMachineCore {
     }
 
 
-    // Убрать ненужные ошибки, которые ломают автомат
+
     // region Методы конечного автомата
-    private void openValve(int indexDP){
-        if (indexDP < 0 || indexDP > 3){
-            throw new IllegalArgumentException("indexDP out of range [0..3]");
-        }
-
-        var valveIndex = getValveIndex(indexDP);
-
-        // находится ли контейнер под нужным резервуаром?
-        if (!DPi[indexDP]){
-            throw new IllegalArgumentException("Container is not under this tank!");
-        }
-
-        // резервуар пустой?
-        if (DRi[valveIndex]){
-            throw new IllegalArgumentException("Tank in this position is empty!");
-        }
-
-        // контейнер в нейтральном положении?
-        if (!DN){
-            throw new IllegalArgumentException("Container should be in default rotation!");
-        }
-
-        // у него открыт клапан?
-        if (DVi[valveIndex]){
-            throw new IllegalArgumentException("Valve in this position is opened!");
-        }
-
+    private void openValve(int destinationPointIndex){
+        var valveIndex = getReservoirIndex(destinationPointIndex);
         Vi[valveIndex] = DVi[valveIndex] = true;
     }
 
-    private void closeValve(int indexDP){
-        if (indexDP < 0 || indexDP > 3){
-            throw new IllegalArgumentException("indexDP out of range [0..3]");
-        }
-
-        var valveIndex = getValveIndex(indexDP);
-
-        // находится ли контейнер под нужным резервуаром?
-        if (!DPi[indexDP]){
-            throw new IllegalArgumentException("Container is not under this tank!");
-        }
-
-        // у него закрыт клапан?
-        if (!DVi[valveIndex]){
-            return;
-        }
-
+    private void closeValve(int destinationPointIndex){
+        var valveIndex = getReservoirIndex(destinationPointIndex);
         Vi[valveIndex] = DVi[valveIndex] = false;
     }
 
-    private int getValveIndex(int indexDP) {
-        return switch (indexDP){
-            case 1 -> 0;
-            case 2 -> 1;
-            case 3 -> 2;
-            default -> throw new IllegalArgumentException("indexDP out of range [1..3]");
-        };
-    }
-
-    private void moveTransporter(int indexDP){
-        if (indexDP < 0 || indexDP > 3){
-            throw new IllegalArgumentException("indexDP out of range [0..3]");
-        }
+    private void moveTransporter(int destinationPointIndex){
+        checkDestinationPointIndex(destinationPointIndex);
 
         // может быть, транспортер уже под DPi?
-        if (DPi[indexDP]){
+        if (isContainerOnDestinationPoint(destinationPointIndex)){
             MR = ML = false;
             return;
         }
 
-        int activeDPi = getActiveDPi();
+        int activeDestinationPointIndex = getActiveDestinationPointIndex();
 
-        if (indexDP > activeDPi && !BK1){
-            activeDPi += 1;
-            setDPi(activeDPi);
+        if (destinationPointIndex > activeDestinationPointIndex && !BK1){
+            activeDestinationPointIndex += 1;
+            setDPi(activeDestinationPointIndex);
             MR = true;
             ML = false;
-        } else if (indexDP < activeDPi && !BK0){
-            activeDPi -= 1;
-            setDPi(activeDPi);
+        } else if (destinationPointIndex < activeDestinationPointIndex && !BK0){
+            activeDestinationPointIndex -= 1;
+            setDPi(activeDestinationPointIndex);
             ML = true;
             MR = false;
         } else {
@@ -137,46 +91,8 @@ public class AutomaticMachineCore {
         }
     }
 
-    private int getActiveDPi() {
-        // получим индекс DP, где сейчас контейнер
-        int activeDPi = -1;
-        for (int i = 0; i < DPi.length; i++) {
-            if (DPi[i]){
-                activeDPi = i;
-                break;  // причем он только один из 4
-            }
-        }
-        return activeDPi;
-    }
-
-    private void setDPi(int indexDP){
-        if (indexDP < 0 || indexDP > 3){
-            throw new IllegalArgumentException("indexDP out of range [0..3]");
-        }
-
-        DPi[0] = DPi[1] = DPi[2] = DPi[3] = false;
-        DPi[indexDP] = true;
-    }
-
-    private void rotateContainerToBunker(int indexDj){
-        if (indexDj < 0 || indexDj > 7){
-            throw new IllegalArgumentException("indexDj out of range [0..7]");
-        }
-
-        // находится ли контейнер возле бункера?
-        var currentPosition = getDPiByDj(indexDj);
-
-        if (!DPi[currentPosition]){
-            throw new IllegalArgumentException("Container is not nearby this bunker!");
-        }
-
-        if (Dj[indexDj]){
-            cannotUnload = true;
-            return;
-            //throw new IllegalArgumentException("Bunker is full!");
-        }
-
-        if (indexDj <= 3){
+    private void rotateContainerToBunker(int bunkerIndex){
+        if (bunkerIndex <= 3){
             MKL = DKL = true;
             MKR = DKR = false;
         }
@@ -185,16 +101,6 @@ public class AutomaticMachineCore {
             MKL = DKL = false;
         }
         DN = false;
-    }
-
-    private static int getDPiByDj(int indexDj) {
-        return switch (indexDj){
-            case 0, 7 -> 0;
-            case 1, 6 -> 1;
-            case 2, 5 -> 2;
-            case 3,4 -> 3;
-            default -> throw new IllegalArgumentException("indexDj out of range [0..7]");
-        };
     }
 
     private void rotateContainerToNormal(){
@@ -210,11 +116,10 @@ public class AutomaticMachineCore {
 
 
     private int[] words;
-    private ContainerState state;
-    private int operationIndex;
-    private LoadStruct loadStruct;
-    private int currentDPi;
-    private boolean cannotUnload;   // все ведет к добавлению cannotUnload
+    private ContainerState state = ContainerState.INIT;
+    private int operationIndex = 0; // раньше начиналось с -1
+    private LoadStruct loadStruct = null;
+    private int currentDestinationPointIndex = -1;
 
     public AutomaticMachineCore(int[] words){
         if (words.length != 4){
@@ -225,18 +130,19 @@ public class AutomaticMachineCore {
     }
 
     public void run(){
-        state = ContainerState.INIT;
-        boolean machineStopped = false;
-        while (!machineStopped){   // все УК == -1: все операции отработаны
-            if (allOperationsCompleted() || operationIndex > 4 || EMERGENCY_STOP) {
-                machineStopped = true;
-            }
+        IO.println(logInfo("-----\tИНИЦИАЛИЗАЦИЯ И ЗАПУСК КОНЕЧНОГО АВТОМАТА\t-----\n"));
+        state = ContainerState.IDLE;
 
-            switch (state){
-                case INIT -> initialize();
+        // подляночки
+        //Dj[2] = true;
+        //DRi[0] = true;
+
+        while (!canMachineBeStopped()) {
+            switch (state) {
                 case IDLE -> idle();
                 case PROCESS_CONTROL_CODE -> processControlCode();
                 case MOVE_TO_POSITION -> moveToPosition();
+                case COMPLETE_OPERATION -> completeOperation();
 
                 // Загрузка:
                 case OPEN_VALVE -> openValve();
@@ -248,148 +154,330 @@ public class AutomaticMachineCore {
                 case UNLOAD -> unload();
                 case ROTATE_TO_NORMAL -> rotateToNormal();
 
-                case COMPLETE_OPERATION -> completeOperation();
-
-                case EMERGENCY_STOP -> emergencyStop();
-                case END -> end();
-                case null, default -> throw new RuntimeException("unqe ungrrr");
+                // Ничего не делать
+                case INIT, EMERGENCY_STOP, END -> {}
+                case null, default -> throw new RuntimeException("unqe? ungrrr!");
             }
-
-            // Здесь можно вывести всю информацию об автомате по завершении его работы
         }
+
+        state = ContainerState.END;
+        var message = logInfo(EMERGENCY_STOP ?
+                "\033[0;31m-----\tАВАРИЙНАЯ ОСТАНОВКА КОНЕЧНОГО АВТОМАТА!\t-----\033[0m" : "-----\tКонечный автомат завершил свою работу!\t-----");
+        IO.println(message);
     }
 
 
 
     // region AutomaticMachineMethods
     // Начальные методы
-    private void initialize(){
-        operationIndex = currentDPi = -1;
-        loadStruct = null;
-        state = ContainerState.IDLE;
-    }
-
     private void idle(){
-        state = allOperationsCompleted() || operationIndex >= 3 ? ContainerState.END : ContainerState.PROCESS_CONTROL_CODE;
-    }
-
-    private boolean allOperationsCompleted(){
-        return words[0] == -1 && words[1] == -1 && words[2] == -1 && words[3] == -1;
+        state = canMachineBeStopped() ? ContainerState.END : ContainerState.PROCESS_CONTROL_CODE;
     }
 
     // Методы циклы
     private void processControlCode(){
-        if (loadStruct != null && tryToLoad()){
+        var message = String.format("-----\tОБРАБОТКА УПРАВЛЯЮЩЕГО КОДА \"%s\"\t-----", to3BitBinary(words[operationIndex]));
+        IO.println(logDebug(message));
+
+        if (loadStruct != null){
+            processLoadOperation();
             return;
         }
 
-        operationIndex++;
+        //operationIndex++; // при начале с -1 было раскомментированно
+        //setEmergencyStop(); // вообще это просто для теста, можно спокойно удалить, подляночка
+
         // ЗАГРУЗКА
         if (operationIndex % 2 == 0){
-            if (loadStruct == null){
-                loadStruct = new LoadStruct(words[operationIndex]);
-            }
-
-            tryToLoad();
+            processLoadOperation();
             return;
         }
 
         // ВЫГРУЗКА
-        currentDPi = getDPiByDj(words[operationIndex]);
+        currentDestinationPointIndex = getContainerPositionByBunker(words[operationIndex]);
         state = ContainerState.MOVE_TO_POSITION;
     }
 
     private void moveToPosition(){
-        moveTransporter(currentDPi);
-        if (currentDPi == getActiveDPi())
-            state = operationIndex % 2 == 0 ? ContainerState.OPEN_VALVE : ContainerState.ROTATE_TO_BUNKER;
+        var message = String.format("-----\tПЕРЕМЕЩЕНИЕ КОНТЕЙНЕРА К DP_%d\t-----", currentDestinationPointIndex);
+        IO.println(message);
+
+        moveTransporter(currentDestinationPointIndex);
+        if (currentDestinationPointIndex == getActiveDestinationPointIndex())
+            state = operationIndex % 2 == 0 ? ContainerState.OPEN_VALVE : ContainerState.ROTATE_TO_BUNKER;  // Загрузка : Выгрузка
+    }
+
+    private void completeOperation(){
+        IO.println(logInfo("-----\tОПЕРАЦИЯ ЗАВЕРШЕНА!\t-----"));
+
+        if (operationIndex % 2 == 0 && loadStruct != null){
+            loadStruct.updateExecutedLoadPosition(currentDestinationPointIndex);
+            currentDestinationPointIndex = -1;
+            if (loadStruct.isOperationCompleted()){
+                loadStruct = null;
+                words[operationIndex] = -1;
+                operationIndex++;   // закомментить это если нужно вернуть -1
+            }
+        } else {
+            currentDestinationPointIndex = -1;
+            words[operationIndex] = -1;
+            operationIndex++;   // закомментить это если нужно вернуть -1
+        }
+
+        state = ContainerState.IDLE;
+        IO.println();
     }
 
     // Загрузка
-    private boolean tryToLoad(){
-        if (!loadStruct.canCompleteOperation()){
-            words[operationIndex + 1] = 0b000;
-            state = ContainerState.COMPLETE_OPERATION;
-            return false;
+    private void processLoadOperation(){
+        // основная задача: получить индекс куда двигаться и перевести автомат в соответствующее состояние
+
+        // начать стоит с проверки на нулевой управляющий код
+        if (words[operationIndex] == 0){
+            moveContainerToWasteBunkerInNextOperation();
+            return;
         }
 
-        currentDPi = loadStruct.getNextLoadPosition();
+        // если до этого в этом цикле новая операция загрузки будет первой
+        if (loadStruct == null){
+            loadStruct = new LoadStruct(words[operationIndex]);
+        }
+
+        currentDestinationPointIndex = loadStruct.getNextLoadPosition();
+        var reservoirIndex = getReservoirIndex(currentDestinationPointIndex);
+
+        // на всякий пожарный
+        checkDestinationPointIndex(currentDestinationPointIndex);
+        checkReservoirIndex(reservoirIndex);
+
+        if (isReservoirEmpty(reservoirIndex) || !isContainerInNeutralRotation() || isReservoirOpened(reservoirIndex)){
+            moveContainerToWasteBunkerInNextOperation();
+            return;
+        }
         state = ContainerState.MOVE_TO_POSITION;
-        return true;
     }
 
     private void openValve(){
-        openValve(currentDPi);
+        var message = String.format("-----\tОТКРЫТИЕ КЛАПАНА РЕЗЕРВУАРА R_%s!\t-----", currentDestinationPointIndex);
+        IO.println(message);
+        openValve(currentDestinationPointIndex);
         state = ContainerState.WAIT_TIMER;
     }
 
     private void waitTimer(){
         // waiting...
+        boolean causeErrorDirectly = false;
+        runTimer(causeErrorDirectly);
+
+        IO.println("-----\tЗАГРУЗКА В КОНТЕЙНЕР...\t-----");
         state = ContainerState.CLOSE_VALVE;
     }
 
     private void closeValve(){
-        closeValve(currentDPi);
+        var message = String.format("-----\tЗАКРЫТИЕ КЛАПАНА РЕЗЕРВУАРА R_%s!\t-----", currentDestinationPointIndex);
+        IO.println(message);
+
+        if (isReservoirClosed(getReservoirIndex(currentDestinationPointIndex))){
+            throw new IllegalArgumentException("Valve in this position is already closed!");
+        }
+
+        closeValve(currentDestinationPointIndex);
         state = ContainerState.COMPLETE_OPERATION;
     }
 
-    // Выгрузка
-    private void rotateToBunker(){
-        rotateContainerToBunker(words[operationIndex]);
 
-        // придется сбросить в отходы, если бункер переполнен)
-        if (cannotUnload){
-            cannotUnload = false;
-            IO.println("Тот бункер заполнен, скидываю в отходы)");
-            currentDPi = 0;
-            words[operationIndex] = 0;  // ахахахах))))
-            state = ContainerState.MOVE_TO_POSITION;
+
+    // Выгрузка (меня полностью устраивает, до тестирования)
+    private void rotateToBunker(){
+        if (!canRotateContainerToBunker(words[operationIndex])){
+            moveContainerToWasteBunkerInCurrentOperation();
             return;
         }
 
+        var message = String.format("-----\tПОВОРОТ КОНТЕЙНЕРА К БУНКЕРУ D_%s ДЛЯ ВЫГРУЗКИ!\t-----", words[operationIndex]);
+        IO.println(message);
+
+        rotateContainerToBunker(words[operationIndex]);
         state = ContainerState.UNLOAD;
     }
 
     private void unload(){
-        IO.println("Содержимое успешно выгружено!");
+        IO.println("-----\tСОДЕРЖИМОЕ УСПЕШНО ВЫГРУЖЕНО!\t-----");
         state = ContainerState.ROTATE_TO_NORMAL;
     }
 
     private void rotateToNormal(){
         rotateContainerToNormal();
+        IO.println("-----\tКОНТЕЙНЕР ВОЗВРАЩЕН В НЕЙТРАЛЬНОЕ ПОЛОЖЕНИЕ!\t-----");
+        state = ContainerState.COMPLETE_OPERATION;
+    }
+    // endregion
+
+
+
+    // Типовые проверки
+    private boolean allOperationsCompleted(){
+        return words[0] == -1 && words[1] == -1 && words[2] == -1 && words[3] == -1;
+    }
+
+    private boolean canMachineBeStopped(){
+        return allOperationsCompleted() || EMERGENCY_STOP;
+    }
+
+    private boolean isContainerOnDestinationPoint(int destinationPointIndex){
+        checkDestinationPointIndex(destinationPointIndex);
+        return DPi[destinationPointIndex];
+    }
+
+    private boolean isReservoirEmpty(int reservoirIndex){
+        checkReservoirIndex(reservoirIndex);
+        return DRi[reservoirIndex];
+    }
+
+    private boolean isContainerInNeutralRotation(){
+        return DN;
+    }
+
+    private boolean isReservoirOpened(int reservoirIndex){
+        checkReservoirIndex(reservoirIndex);
+        return DVi[reservoirIndex];
+    }
+
+    private boolean isReservoirClosed(int reservoirIndex){
+        checkReservoirIndex(reservoirIndex);
+        return !DVi[reservoirIndex];
+    }
+
+    private boolean isBunkerFull(int bunkerIndex){
+        checkBunkerIndex(bunkerIndex);
+        return Dj[bunkerIndex];
+    }
+
+    private boolean canRotateContainerToBunker(int bunkerIndex){
+        checkBunkerIndex(bunkerIndex);
+        return isContainerOnDestinationPoint(getContainerPositionByBunker(bunkerIndex)) && !isBunkerFull(bunkerIndex);
+    }
+
+
+
+    // Типовые методы
+    private void checkDestinationPointIndex(int destinationPointIndex){
+        if (destinationPointIndex < 0 || destinationPointIndex > 3){
+            throw new IllegalArgumentException("destinationPointIndex is out of range [0..3]");
+        }
+    }
+
+    private void checkReservoirIndex(int reservoirIndex){
+        if (reservoirIndex < 0 || reservoirIndex > 2){
+            throw new IllegalArgumentException("indexR is out of range [0..2]");
+        }
+    }
+
+    private void checkBunkerIndex(int bunkerIndex){
+        if (bunkerIndex < 0 || bunkerIndex > 7){
+            throw new IllegalArgumentException("bunkerIndex is out of range [0..7]");
+        }
+    }
+
+    private int getReservoirIndex(int destinationPointIndex) {
+        return switch (destinationPointIndex){
+            case 1 -> 0;
+            case 2 -> 1;
+            case 3 -> 2;
+            default -> throw new IllegalArgumentException("destinationPointIndex out of range [1..3]");
+        };
+    }
+
+    private int getActiveDestinationPointIndex() {
+        // получим индекс DP, где сейчас контейнер
+        for (int i = 0; i < DPi.length; i++) {
+            if (DPi[i]){
+                return i;
+            }
+        }
+        throw new IllegalStateException("There is no active DPi!");
+    }
+
+    private void setDPi(int destinationPointIndex){
+        checkDestinationPointIndex(destinationPointIndex);
+        DPi[0] = DPi[1] = DPi[2] = DPi[3] = false;
+        DPi[destinationPointIndex] = true;
+    }
+
+    private static int getContainerPositionByBunker(int bunkerIndex) {
+        return switch (bunkerIndex){
+            case 0, 7 -> 0;
+            case 1, 6 -> 1;
+            case 2, 5 -> 2;
+            case 3,4 -> 3;
+            default -> throw new IllegalArgumentException("bunkerIndex out of range [0..7]");
+        };
+    }
+
+    private void moveContainerToWasteBunkerInCurrentOperation(){
+        var message = String.format("-----\tБУНКЕР D_%s ЗАПОЛНЕН! ОТПРАВЛЯЮ СОДЕРЖИМОЕ НА УТИЛИЗАЦИЮ!\t-----", words[operationIndex]);
+        IO.println(logDebug(message));
+        currentDestinationPointIndex = 0;
+        words[operationIndex] = 0;
+        state = ContainerState.MOVE_TO_POSITION;
+    }
+
+    private void moveContainerToWasteBunkerInNextOperation(){
+        var message = "-----\tУПРАВЛЯЮЩИЙ КОД \"000\" ИЛИ ОШИБКА ПРИ ВЫПОЛНЕНИИ ОПЕРАЦИИ ЗАГРУЗКИ (ЗАКОНЧИЛСЯ МАТЕРИАЛ)!\t-----\n-----\tОТПРАВЛЯЮ СОДЕРЖИМОЕ НА УТИЛИЗАЦИЮ СО СЛЕДУЮЩЕЙ ОПЕРАЦИИ!\t-----";
+        IO.println(logDebug(message));
+        words[operationIndex + 1] = 0b000;  // ошибка индекса никогда не возникнет
+        loadStruct = null;
         state = ContainerState.COMPLETE_OPERATION;
     }
 
-
-
-    private void completeOperation(){
-        if (operationIndex % 2 == 0){
-            loadStruct.updateExecutedLoadPosition(currentDPi);
-            if (!loadStruct.canCompleteOperation())
-                loadStruct = null;
-        }
-        cannotUnload = false;
-        currentDPi = -1;
-        words[operationIndex] = -1;
-
-        state = ContainerState.IDLE;
-    }
-
-
-
-    // Методы завершения работы
-    private void emergencyStop(){
-        state = ContainerState.END;
-    }
-
-    private void end(){
-        if (!EMERGENCY_STOP){
-            IO.println("Конечный автомат завершил свою работу!");
-            //System.exit(1337);
+    private void runTimer(boolean causeErrorDirectly){
+        var elapsedTime = 0;
+        if (!causeErrorDirectly){
+            while (!DT){
+                elapsedTime++;
+                if (elapsedTime >= OPERATION_TIME){
+                    DT = true;
+                    IO.println(logDebug("Сработал датчик времени выполнения операции DT!"));
+                    stopTimer();
+                    break;
+                }
+            }
         } else {
-            IO.println("Аварийная остановка конечного автомата!");
-            System.exit(1488);
+            while (!AT){
+                elapsedTime++;
+
+                if (elapsedTime >= OPERATION_TIME){
+                    DT = true;
+                }
+                if (elapsedTime >= EMERGENCY_OPERATION_TIME){
+                    AT = true;
+                    IO.println("Сработал датчик \033[0;31mАВАРИЙНОГО\033[0m времени выполнения операции AT!");
+                    stopTimer();
+                    break;
+                }
+            }
         }
     }
-    // endregion
+
+    private void stopTimer(){
+        DT = AT = false;
+    }
+
+    public String to3BitBinary(int number) {
+        // Ограничиваем число 3 битами (0-7)
+        int maskedNumber = number & 0b111;
+        // Форматируем с ведущими нулями
+        return String.format("%3s", Integer.toBinaryString(maskedNumber))
+                .replace(' ', '0');
+    }
+
+    public String logDebug(String logging) {
+        return "\u001B[34m" + logging + "\u001B[0m";
+    }
+    public String logInfo(String logging) {
+        return "\u001B[32m" + logging + "\u001B[0m";
+    }
+    public String logError(String logging) {
+        return "\u001B[31m" + logging + "\u001B[0m";
+    }
 }
