@@ -67,13 +67,14 @@ public class AutomaticMachineCore {
             throw new IllegalArgumentException("Tank in this position is empty!");
         }
 
+        // контейнер в нейтральном положении?
+        if (!DN){
+            throw new IllegalArgumentException("Container should be in default rotation!");
+        }
+
         // у него открыт клапан?
         if (DVi[valveIndex]){
             throw new IllegalArgumentException("Valve in this position is opened!");
-        }
-
-        if (!DN){
-            throw new IllegalArgumentException("Container should be in default rotation!");
         }
 
         Vi[valveIndex] = DVi[valveIndex] = true;
@@ -87,7 +88,7 @@ public class AutomaticMachineCore {
         var valveIndex = getValveIndex(indexDP);
 
         // находится ли контейнер под нужным резервуаром?
-        if (!DPi[valveIndex]){
+        if (!DPi[indexDP]){
             throw new IllegalArgumentException("Container is not under this tank!");
         }
 
@@ -224,12 +225,23 @@ public class AutomaticMachineCore {
     }
 
     public void run(){
-        while (!allOperationsCompleted() || operationIndex < 4){   // все УК == -1: все операции отработаны
+        state = ContainerState.INIT;
+        boolean machineStopped = false;
+        while (!machineStopped){   // все УК == -1: все операции отработаны
+            if (allOperationsCompleted() || operationIndex > 4 || EMERGENCY_STOP) {
+                machineStopped = true;
+            }
+
             switch (state){
+                case INIT -> initialize();
                 case IDLE -> idle();
                 case PROCESS_CONTROL_CODE -> processControlCode();
                 case MOVE_TO_POSITION -> moveToPosition();
+
                 // Загрузка:
+                case OPEN_VALVE -> openValve();
+                case WAIT_TIMER -> waitTimer();
+                case CLOSE_VALVE -> closeValve();
 
                 // Разгрузка:
                 case ROTATE_TO_BUNKER -> rotateToBunker();
@@ -240,9 +252,10 @@ public class AutomaticMachineCore {
 
                 case EMERGENCY_STOP -> emergencyStop();
                 case END -> end();
-                case null -> initialize();
-                default -> throw new RuntimeException("unqe ungrrr");
+                case null, default -> throw new RuntimeException("unqe ungrrr");
             }
+
+            // Здесь можно вывести всю информацию об автомате по завершении его работы
         }
     }
 
@@ -265,18 +278,24 @@ public class AutomaticMachineCore {
     }
 
     // Методы циклы
-    // Сейчас цель: закончить разгрузку полностью
     private void processControlCode(){
-        // условие на довыполнение операции разгрузки будет позже
-
-        operationIndex++;
-        if (operationIndex % 2 == 0){   // ЗАГРУЗКА
-            IO.println("ОПЕРАЦИИ ЗАГРУЗКИ ПОКА НЕДОСТУПНЫ, ПРОПУСК УПРАВЛЯЮЩЕГО КОДА!");
+        if (loadStruct != null && tryToLoad()){
             return;
-        } else {    // ВЫГРУЗКА
-            currentDPi = getDPiByDj(words[operationIndex]);
         }
 
+        operationIndex++;
+        // ЗАГРУЗКА
+        if (operationIndex % 2 == 0){
+            if (loadStruct == null){
+                loadStruct = new LoadStruct(words[operationIndex]);
+            }
+
+            tryToLoad();
+            return;
+        }
+
+        // ВЫГРУЗКА
+        currentDPi = getDPiByDj(words[operationIndex]);
         state = ContainerState.MOVE_TO_POSITION;
     }
 
@@ -287,6 +306,32 @@ public class AutomaticMachineCore {
     }
 
     // Загрузка
+    private boolean tryToLoad(){
+        if (!loadStruct.canCompleteOperation()){
+            words[operationIndex + 1] = 0b000;
+            state = ContainerState.COMPLETE_OPERATION;
+            return false;
+        }
+
+        currentDPi = loadStruct.getNextLoadPosition();
+        state = ContainerState.MOVE_TO_POSITION;
+        return true;
+    }
+
+    private void openValve(){
+        openValve(currentDPi);
+        state = ContainerState.WAIT_TIMER;
+    }
+
+    private void waitTimer(){
+        // waiting...
+        state = ContainerState.CLOSE_VALVE;
+    }
+
+    private void closeValve(){
+        closeValve(currentDPi);
+        state = ContainerState.COMPLETE_OPERATION;
+    }
 
     // Выгрузка
     private void rotateToBunker(){
@@ -318,11 +363,15 @@ public class AutomaticMachineCore {
 
 
     private void completeOperation(){
+        if (operationIndex % 2 == 0){
+            loadStruct.updateExecutedLoadPosition(currentDPi);
+            if (!loadStruct.canCompleteOperation())
+                loadStruct = null;
+        }
         cannotUnload = false;
         currentDPi = -1;
         words[operationIndex] = -1;
-        if (operationIndex % 2 == 0)
-            loadStruct = null;
+
         state = ContainerState.IDLE;
     }
 
@@ -336,7 +385,7 @@ public class AutomaticMachineCore {
     private void end(){
         if (!EMERGENCY_STOP){
             IO.println("Конечный автомат завершил свою работу!");
-            System.exit(1337);
+            //System.exit(1337);
         } else {
             IO.println("Аварийная остановка конечного автомата!");
             System.exit(1488);

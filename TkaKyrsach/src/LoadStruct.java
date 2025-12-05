@@ -16,7 +16,7 @@ public class LoadStruct {
     }
 
     public boolean canCompleteOperation(){
-        return !cannotLoad;
+        return !cannotLoad && !isOperationCompleted();
     }
 
     /**
