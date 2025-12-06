@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="TkaKyrsach:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/TkaKyrsach_jar</output-path>
+    <root id="archive" name="TkaKyrsach.jar">
+      <element id="module-output" name="TkaKyrsach" />
+    </root>
+  </artifact>
+</component>
